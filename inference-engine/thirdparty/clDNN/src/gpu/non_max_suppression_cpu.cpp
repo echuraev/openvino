@@ -21,6 +21,7 @@
 #include "cpu_impl_helpers.hpp"
 
 #include <vector>
+#include <list>
 #include <algorithm>
 #include <utility>
 #include <tuple>
@@ -42,46 +43,72 @@ std::vector<result_indices> run_nms(
     const vector3D<float>& scores,
     int num_select_per_class,
     float score_threshold,
-    float iou_threshold
+    float iou_threshold,
+    float soft_nms_sigma
 ) {
     std::vector<result_indices> result;
 
     for (size_t bi = 0; bi < boxes.size(); ++bi) {
         for (size_t ci = 0; ci < scores[bi].size(); ++ci) {
-            std::vector<std::pair<float, int>> score_box;
-            for (size_t bbi = 0; bbi < boxes[bi].size(); ++bbi) {
-                if (scores[bi][ci][bbi] > score_threshold)
-                    score_box.emplace_back(scores[bi][ci][bbi], static_cast<int>(bbi));
-            }
+            if (soft_nms_sigma) {
+                std::list<std::pair<float, int>> score_box;
+                for (size_t bbi = 0; bbi < boxes[bi].size(); ++bbi) {
+                    if (scores[bi][ci][bbi] >= score_threshold)
+                        score_box.emplace_back(scores[bi][ci][bbi], static_cast<int>(bbi));
+                }
 
-            std::sort(score_box.begin(), score_box.end(), [](const std::pair<float, int>& a, const std::pair<float, int>& b) {return a.first > b.first; });
+                for (int i = 0; i < num_select_per_class && !score_box.empty(); ++i) {
+                    auto best_score_box_it = std::max_element(score_box.begin(), score_box.end());
+                    float best_score = best_score_box_it->first;
+                    int best_box_index = best_score_box_it->second;
+                    score_box.erase(best_score_box_it);
 
-            size_t selected_number = 0;
-            for (size_t i = 0; i < score_box.size(); ++i) {
-                bool keep = true;
-                auto box1_index = score_box[i].second;
-                auto& box1 = boxes[bi][box1_index];
-                for (size_t j = 0; j < selected_number; ++j) {
-                    auto box2_index = score_box[j].second;
-                    auto& box2 = boxes[bi][box2_index];
-
-                    if (iou(box1, box2) > iou_threshold) {
-                        keep = false;
-                        break;
+                    if (best_score >= score_threshold) {
+                        result.push_back(result_indices{ best_score, static_cast<int>(bi), static_cast<int>(ci), best_box_index });
+                    }
+                    for (auto& sb: score_box) {
+                        size_t box_index = sb.second;
+                        auto& box = boxes[bi][box_index];
+                        auto iou_boxes = iou(boxes[bi][best_box_index], box);
+                        auto coeff = std::exp(-0.5f * iou_boxes * iou_boxes / soft_nms_sigma);
+                        sb.first *= iou_boxes <= iou_threshold ? coeff : 0.f;
                     }
                 }
-                if (keep) {
-                    score_box[selected_number] = score_box[i];
-                    selected_number += 1;
-                    result.push_back(result_indices{ score_box[i].first, static_cast<int>(bi), static_cast<int>(ci), score_box[i].second });
+            } else {
+                std::vector<std::pair<float, int>> score_box;
+                for (size_t bbi = 0; bbi < boxes[bi].size(); ++bbi) {
+                    if (scores[bi][ci][bbi] > score_threshold)
+                        score_box.emplace_back(scores[bi][ci][bbi], static_cast<int>(bbi));
+                }
 
-                    if (num_select_per_class == static_cast<int>(selected_number))
-                        break;
+                std::sort(score_box.begin(), score_box.end(), [](const std::pair<float, int>& a, const std::pair<float, int>& b) {return a.first > b.first; });
+
+                size_t selected_number = 0;
+                for (size_t i = 0; i < score_box.size(); ++i) {
+                    bool keep = true;
+                    auto box1_index = score_box[i].second;
+                    auto& box1 = boxes[bi][box1_index];
+                    for (size_t j = 0; j < selected_number; ++j) {
+                        auto box2_index = score_box[j].second;
+                        auto& box2 = boxes[bi][box2_index];
+
+                        if (iou(box1, box2) > iou_threshold) {
+                            keep = false;
+                            break;
+                        }
+                    }
+                    if (keep) {
+                        score_box[selected_number] = score_box[i];
+                        selected_number += 1;
+                        result.push_back(result_indices{ score_box[i].first, static_cast<int>(bi), static_cast<int>(ci), score_box[i].second });
+
+                        if (num_select_per_class == static_cast<int>(selected_number))
+                            break;
+                    }
                 }
             }
         }
     }
-
     std::sort(result.begin(), result.end(), [](const result_indices& a, const result_indices& b) {return a.score > b.score; });
 
     return result;
@@ -235,6 +262,81 @@ void store_result(memory_impl& mem, const std::vector<result_indices>& result) {
     }
 }
 
+template <typename T>
+void store_first_output_impl(memory_impl& mem, const std::vector<result_indices>& result) {
+    mem_lock<T> lock(mem);
+    auto ptr = lock.data();
+
+    for (size_t si = 0; si < result.size(); ++si) {
+        auto offset = si * 3;
+        ptr[offset + 0] = static_cast<T>(result[si].batch_index);
+        ptr[offset + 1] = static_cast<T>(result[si].class_index);
+        ptr[offset + 2] = static_cast<T>(result[si].box_index);
+    }
+}
+
+void store_first_output(memory_impl& mem, const std::vector<result_indices>& result) {
+    auto data_type = mem.get_layout().data_type;
+    switch (data_type) {
+    case cldnn::data_types::i32:
+        store_first_output_impl<data_type_to_type<data_types::i32>::type>(mem, result);
+        break;
+    case cldnn::data_types::i64:
+        store_first_output_impl<data_type_to_type<data_types::i32>::type>(mem, result);
+        break;
+    default:
+        throw std::runtime_error("Non max supression - unsupported output data type");
+    }
+}
+
+template <typename T>
+void store_second_output_impl(memory_impl& mem, const std::vector<result_indices>& result) {
+    mem_lock<T> lock(mem);
+    auto ptr = lock.data();
+
+    for (size_t si = 0; si < result.size(); ++si) {
+        auto offset = si * 3;
+        ptr[offset + 0] = static_cast<T>(result[si].batch_index);
+        ptr[offset + 1] = static_cast<T>(result[si].class_index);
+        ptr[offset + 2] = static_cast<T>(result[si].score);
+    }
+}
+
+void store_second_output(memory_impl& mem, const std::vector<result_indices>& result) {
+    auto data_type = mem.get_layout().data_type;
+    switch (data_type) {
+    case cldnn::data_types::f16:
+        store_second_output_impl<data_type_to_type<data_types::f16>::type>(mem, result);
+        break;
+    case cldnn::data_types::f32:
+        store_second_output_impl<data_type_to_type<data_types::f32>::type>(mem, result);
+        break;
+    default:
+        throw std::runtime_error("Non max supression - unsupported second output data type");
+    }
+}
+
+template <typename T>
+void store_third_output_impl(memory_impl& mem, const std::vector<result_indices>& result) {
+    mem_lock<T> lock(mem);
+    auto ptr = lock.data();
+    ptr[0] = result.size();
+}
+
+void store_third_output(memory_impl& mem, const std::vector<result_indices>& result) {
+    auto data_type = mem.get_layout().data_type;
+    switch (data_type) {
+    case cldnn::data_types::i32:
+        store_third_output_impl<data_type_to_type<data_types::i32>::type>(mem, result);
+        break;
+    case cldnn::data_types::i64:
+        store_third_output_impl<data_type_to_type<data_types::i32>::type>(mem, result);
+        break;
+    default:
+        throw std::runtime_error("Non max supression - unsupported third output data type");
+    }
+}
+
 void run(non_max_suppression_inst& instance) {
     auto prim = instance.node.get_primitive();
 
@@ -244,6 +346,7 @@ void run(non_max_suppression_inst& instance) {
     int num_select_per_class = -1;
     float iou_threshold = 1.f;
     float score_threshold = 0.f;
+    float soft_nms_sigma = 0.f;
 
     if (instance.has_num_select_per_class()) {
         num_select_per_class = load_scalar<int>(instance.num_select_per_class_mem());
@@ -257,7 +360,25 @@ void run(non_max_suppression_inst& instance) {
         score_threshold = load_scalar<float>(instance.score_threshold_mem());
     }
 
-    auto result = run_nms(boxes, scores, num_select_per_class, score_threshold, iou_threshold);
+    if (instance.has_soft_nms_sigma()) {
+        soft_nms_sigma = load_scalar<float>(instance.soft_nms_sigma_mem());
+    }
+
+    auto result = run_nms(boxes, scores, num_select_per_class, score_threshold, iou_threshold, soft_nms_sigma);
+
+    for (auto el : result) {
+        std::cout << "batch: " << el.batch_index << "class: " << el.class_index << "score: "  << el.score << std::endl;
+    }
+
+    if (instance.has_third_output()) {
+        store_third_output(instance.third_output_mem(), result);
+    }
+
+    if (instance.has_second_output()) {
+        store_first_output(instance.output_memory(), result);
+        store_second_output(instance.second_output_mem(), result);
+        return;
+    }
 
     store_result(instance.output_memory(), result);
 }
