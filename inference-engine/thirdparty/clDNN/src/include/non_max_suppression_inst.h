@@ -150,6 +150,7 @@ public:
         offset += has_iou_threshold();
         offset += has_score_threshold();
         offset += has_soft_nms_sigma();
+        //std::cout << " >>> second offset(4): " << offset << std::endl;
         return dep_memory(offset);
     }
 
@@ -161,6 +162,7 @@ public:
         offset += has_score_threshold();
         offset += has_soft_nms_sigma();
         offset += has_second_output();
+        //std::cout << " >>> third offset(5): " << offset << std::endl;
         return dep_memory(offset);
     }
 };

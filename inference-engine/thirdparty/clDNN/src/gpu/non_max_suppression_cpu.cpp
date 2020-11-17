@@ -51,7 +51,7 @@ std::vector<result_indices> run_nms(
     for (size_t bi = 0; bi < boxes.size(); ++bi) {
         for (size_t ci = 0; ci < scores[bi].size(); ++ci) {
             if (soft_nms_sigma) {
-                std::list<std::pair<float, int>> score_box;
+                std::vector<std::pair<float, int>> score_box;
                 for (size_t bbi = 0; bbi < boxes[bi].size(); ++bbi) {
                     if (scores[bi][ci][bbi] >= score_threshold)
                         score_box.emplace_back(scores[bi][ci][bbi], static_cast<int>(bbi));
@@ -226,6 +226,7 @@ template <typename T>
 void store_result_impl(memory_impl& mem, const std::vector<result_indices>& result) {
     mem_lock<T> lock(mem);
     auto ptr = lock.data();
+    std::cout << "store_result_impl: " << ptr << std::endl;
 
     auto output_size = static_cast<size_t>(mem.get_layout().size.batch[0]);
     auto results_size = result.size();
@@ -262,27 +263,14 @@ void store_result(memory_impl& mem, const std::vector<result_indices>& result) {
     }
 }
 
-template <typename T>
-void store_first_output_impl(memory_impl& mem, const std::vector<result_indices>& result) {
-    mem_lock<T> lock(mem);
-    auto ptr = lock.data();
-
-    for (size_t si = 0; si < result.size(); ++si) {
-        auto offset = si * 3;
-        ptr[offset + 0] = static_cast<T>(result[si].batch_index);
-        ptr[offset + 1] = static_cast<T>(result[si].class_index);
-        ptr[offset + 2] = static_cast<T>(result[si].box_index);
-    }
-}
-
 void store_first_output(memory_impl& mem, const std::vector<result_indices>& result) {
     auto data_type = mem.get_layout().data_type;
     switch (data_type) {
     case cldnn::data_types::i32:
-        store_first_output_impl<data_type_to_type<data_types::i32>::type>(mem, result);
+        store_result_impl<data_type_to_type<data_types::i32>::type>(mem, result);
         break;
     case cldnn::data_types::i64:
-        store_first_output_impl<data_type_to_type<data_types::i32>::type>(mem, result);
+        store_result_impl<data_type_to_type<data_types::i32>::type>(mem, result);
         break;
     default:
         throw std::runtime_error("Non max supression - unsupported output data type");
@@ -293,12 +281,16 @@ template <typename T>
 void store_second_output_impl(memory_impl& mem, const std::vector<result_indices>& result) {
     mem_lock<T> lock(mem);
     auto ptr = lock.data();
+    std::cout << "store_second_output_impl: " << ptr << std::endl;
 
     for (size_t si = 0; si < result.size(); ++si) {
         auto offset = si * 3;
         ptr[offset + 0] = static_cast<T>(result[si].batch_index);
         ptr[offset + 1] = static_cast<T>(result[si].class_index);
         ptr[offset + 2] = static_cast<T>(result[si].score);
+        //std::cout << si << " >>> second: b_ind: " << static_cast<float>(result[si].batch_index)
+        //          << ", c_ind: " << static_cast<float>(result[si].class_index)
+        //          << ", score: " << static_cast<float>(result[si].score) << std::endl;
     }
 }
 
@@ -306,9 +298,11 @@ void store_second_output(memory_impl& mem, const std::vector<result_indices>& re
     auto data_type = mem.get_layout().data_type;
     switch (data_type) {
     case cldnn::data_types::f16:
+        std::cout << " <<< F16 >>> " << std::endl;
         store_second_output_impl<data_type_to_type<data_types::f16>::type>(mem, result);
         break;
     case cldnn::data_types::f32:
+        std::cout << " <<< F32 >>> " << std::endl;
         store_second_output_impl<data_type_to_type<data_types::f32>::type>(mem, result);
         break;
     default:
@@ -321,6 +315,7 @@ void store_third_output_impl(memory_impl& mem, const std::vector<result_indices>
     mem_lock<T> lock(mem);
     auto ptr = lock.data();
     ptr[0] = result.size();
+    std::cout << "store_third_output_impl: " << ptr << ", val: " << ptr[0] << std::endl;
 }
 
 void store_third_output(memory_impl& mem, const std::vector<result_indices>& result) {
@@ -366,17 +361,20 @@ void run(non_max_suppression_inst& instance) {
 
     auto result = run_nms(boxes, scores, num_select_per_class, score_threshold, iou_threshold, soft_nms_sigma);
 
-    for (auto el : result) {
-        std::cout << "batch: " << el.batch_index << "class: " << el.class_index << "score: "  << el.score << std::endl;
-    }
+    //for (auto el : result) {
+    //    std::cout << "batch: " << el.batch_index << ", class: " << el.class_index << ", score: "  << el.score << ", box_index: " << el.box_index << std::endl;
+    //}
+    std::cout << "1: " << &instance.output_memory()
+              << ", 2: " << &instance.second_output_mem()
+              << ", 3: " << &instance.third_output_mem() << std::endl;
 
     if (instance.has_third_output()) {
         store_third_output(instance.third_output_mem(), result);
     }
 
     if (instance.has_second_output()) {
-        store_first_output(instance.output_memory(), result);
         store_second_output(instance.second_output_mem(), result);
+        store_first_output(instance.output_memory(), result);
         return;
     }
 

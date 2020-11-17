@@ -170,7 +170,7 @@ protected:
             const auto &ref = expected[i];
             const auto &res = actual[i];
             const auto absoluteDifference = ie_abs(res - ref);
-            std::cout << i << ": Exp: " << ref << " Act: " << res << std::endl;
+            //std::cout << i << ": Exp: " << ref << " Act: " << res << std::endl;
             if (absoluteDifference <= threshold) {
                 continue;
             }

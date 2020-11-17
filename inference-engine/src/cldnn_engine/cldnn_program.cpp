@@ -4975,7 +4975,7 @@ void Program::CreateNonMaxSuppressionPrimitive(cldnn::topology& topology, Infere
         }
     }
 
-    std::size_t num_output = layer->outData.size();
+    std::size_t num_output = nonMaxSupression->outData.size();
 
     // clDNN primitive supports only i32 as output data type
     nonMaxSupression->outData[0]->setPrecision(Precision::I32);
@@ -4990,43 +4990,45 @@ void Program::CreateNonMaxSuppressionPrimitive(cldnn::topology& topology, Infere
     std::vector<cldnn::memory> shared_memory;
     switch (num_output) {
     case 3: {
-        auto mutable_precision_second = layer->outData[2]->getPrecision();
+        auto mutable_precision_second = nonMaxSupression->outData[2]->getPrecision();
         cldnn::layout mutableLayoutSecond = cldnn::layout(
                 DataTypeFromPrecision(mutable_precision_second),
                 m_defaultFormat,
-                CldnnTensorFromIEDims(layer->outData[2]->getDims()));
+                CldnnTensorFromIEDims(nonMaxSupression->outData[2]->getDims()));
 
         shared_memory.push_back(cldnn::memory::allocate(*m_engine, mutableLayoutSecond));
+        std::cout << "cldnn_program, 3: " << shared_memory.back().get() << std::endl;
 
         cldnn::primitive_id non_max_supression_mutable_id_w_second = layer_type_name_ID(layer) + "_md_write_second";
-            auto argmax_mutable_prim_second = cldnn::mutable_data(non_max_supression_mutable_id_w_second, shared_memory.back());
-            primitivesToIRLayersMap[non_max_supression_mutable_id_w_second] = { layer->name };
+            auto nms_mutable_prim_second = cldnn::mutable_data(non_max_supression_mutable_id_w_second, shared_memory.back());
+            primitivesToIRLayersMap[non_max_supression_mutable_id_w_second] = { nonMaxSupression->name };
             primitiveIDs[non_max_supression_mutable_id_w_second] = non_max_supression_mutable_id_w_second;
-            topology.add(argmax_mutable_prim_second);
+            topology.add(nms_mutable_prim_second);
             inputPrimitives.push_back(non_max_supression_mutable_id_w_second);
     }
     case 2: {
-        auto mutable_precision_first = layer->outData[1]->getPrecision();
+        auto mutable_precision_first = nonMaxSupression->outData[1]->getPrecision();
 
         cldnn::layout mutableLayoutFirst = cldnn::layout(
             DataTypeFromPrecision(mutable_precision_first),
             m_defaultFormat,
-            CldnnTensorFromIEDims(layer->outData[1]->getDims()));
+            CldnnTensorFromIEDims(nonMaxSupression->outData[1]->getDims()));
 
-            shared_memory.push_back(cldnn::memory::allocate(*m_engine, mutableLayoutFirst));
+        shared_memory.push_back(cldnn::memory::allocate(*m_engine, mutableLayoutFirst));
+        std::cout << "cldnn_program, 2: " << shared_memory.back().get() << std::endl;
 
-            cldnn::primitive_id non_max_supression_mutable_id_w_first = layer_type_name_ID(layer) + "_md_write_first";
-            auto argmax_mutable_prim_first = cldnn::mutable_data(non_max_supression_mutable_id_w_first, shared_memory.back());
-            primitivesToIRLayersMap[non_max_supression_mutable_id_w_first] = { layer->name };
-            primitiveIDs[non_max_supression_mutable_id_w_first] = non_max_supression_mutable_id_w_first;
-            topology.add(argmax_mutable_prim_first);
-            inputPrimitives.push_back(non_max_supression_mutable_id_w_first);
+        cldnn::primitive_id non_max_supression_mutable_id_w_first = layer_type_name_ID(layer) + "_md_write_first";
+        auto nms_mutable_prim_first = cldnn::mutable_data(non_max_supression_mutable_id_w_first, shared_memory.back());
+        primitivesToIRLayersMap[non_max_supression_mutable_id_w_first] = { nonMaxSupression->name };
+        primitiveIDs[non_max_supression_mutable_id_w_first] = non_max_supression_mutable_id_w_first;
+        topology.add(nms_mutable_prim_first);
+        inputPrimitives.push_back(non_max_supression_mutable_id_w_first);
     }
     case 1: break;
     default: THROW_CLDNN_EXCEPTION("Incorrect number of output for layer: " << layer->name);
     }
 
-    auto nonMaxSupressionLayerName = num_output > 2 ? layer_type_lower(layer) + ":" + layer->outData[0]->getName() : layer_type_name_ID(layer);
+    auto nonMaxSupressionLayerName = num_output > 1 ? layer_type_lower(layer) + ":" + layer->outData[0]->getName() : layer_type_name_ID(layer);
     auto prim = cldnn::non_max_suppression(
             nonMaxSupressionLayerName,
             reorderedInputs[0],
@@ -5056,158 +5058,24 @@ void Program::CreateNonMaxSuppressionPrimitive(cldnn::topology& topology, Infere
     switch (num_output) {
     case 3: {
         cldnn::primitive_id non_max_supression_id_r_first = layer_type_lower(layer) + ":" + layer->outData[1]->getName();
-        auto argmax_mutable_prim_r_first = cldnn::mutable_data(non_max_supression_id_r_first, { nonMaxSupressionLayerName }, shared_memory.front());
+        auto nms_mutable_prim_r_first = cldnn::mutable_data(non_max_supression_id_r_first, { nonMaxSupressionLayerName }, shared_memory.front());
+        std::cout << "1. cldnn_program, 3: " << shared_memory.front().get() << std::endl;
         primitivesToIRLayersMap[non_max_supression_id_r_first] = { layer->name };
         primitiveIDs[non_max_supression_id_r_first] = non_max_supression_id_r_first;
-        topology.add(argmax_mutable_prim_r_first);
+        topology.add(nms_mutable_prim_r_first);
     }
     case 2: {
         cldnn::primitive_id non_max_supression_id_r_second = layer_type_lower(layer) + ":" + layer->outData[2]->getName();
-        auto argmax_mutable_prim_r_second = cldnn::mutable_data(non_max_supression_id_r_second, { nonMaxSupressionLayerName }, shared_memory.back());
+        auto nms_mutable_prim_r_second = cldnn::mutable_data(non_max_supression_id_r_second, { nonMaxSupressionLayerName }, shared_memory.back());
+        std::cout << "2. cldnn_program, 2: " << shared_memory.back().get() << std::endl;
         primitivesToIRLayersMap[non_max_supression_id_r_second] = { layer->name };
         primitiveIDs[non_max_supression_id_r_second] = non_max_supression_id_r_second;
-        topology.add(argmax_mutable_prim_r_second);
+        topology.add(nms_mutable_prim_r_second);
     }
     default: break;
     }
 
     AddPrimitiveToProfiler(nonMaxSupressionLayerName, layer);
-
-    /*if (layer->outData.size() == 1) {
-        auto name = layer_type_name_ID(layer);
-        auto prim = cldnn::non_max_suppression(
-            name,
-            reorderedInputs[0],
-            reorderedInputs[1],
-            static_cast<int>(outputIndices),
-            centerPointBox);
-
-        prim.output_data_type = DataTypeFromPrecision(nonMaxSupression->outData[0]->getTensorDesc().getPrecision());
-
-        switch (reorderedInputs.size()) {
-            case 6: prim.soft_nms_sigma = reorderedInputs[5];
-            case 5: prim.score_threshold = reorderedInputs[4];
-            case 4: prim.iou_threshold = reorderedInputs[3];
-            case 3: prim.num_select_per_class = reorderedInputs[2];
-            case 2:
-            case 1:
-            break;
-        }
-        topology.add(prim);
-        AddPrimitiveToProfiler(name , layer);
-
-    } else if (layer->outData.size() == 2) {
-        auto mutable_precision = layer->outData[1]->getPrecision();
-
-        cldnn::layout mutableLayout = cldnn::layout(
-            DataTypeFromPrecision(mutable_precision),
-            m_defaultFormat,
-            CldnnTensorFromIEDims(layer->outData[1]->getDims()));
-
-        auto shared_memory = cldnn::memory::allocate(*m_engine, mutableLayout);
-
-        cldnn::primitive_id non_max_supression_mutable_id_w = layer_type_name_ID(layer) + "_md_write";
-        auto argmax_mutable_prim = cldnn::mutable_data(non_max_supression_mutable_id_w, shared_memory);
-        primitivesToIRLayersMap[non_max_supression_mutable_id_w] = { layer->name };
-        primitiveIDs[non_max_supression_mutable_id_w] = non_max_supression_mutable_id_w;
-        topology.add(argmax_mutable_prim);
-        inputPrimitives.push_back(non_max_supression_mutable_id_w);
-
-        std::string nonMaxSupressionLayerName = layer_type_lower(layer) + ":" + layer->outData[0]->getName();
-        auto prim = cldnn::non_max_suppression(
-            nonMaxSupressionLayerName,
-            reorderedInputs[0],
-            reorderedInputs[1],
-            static_cast<int>(outputIndices),
-            centerPointBox,
-            non_max_supression_mutable_id_w
-            );
-
-        switch (reorderedInputs.size()) {
-            case 6: prim.soft_nms_sigma = reorderedInputs[5];
-            case 5: prim.score_threshold = reorderedInputs[4];
-            case 4: prim.iou_threshold = reorderedInputs[3];
-            case 3: prim.num_select_per_class = reorderedInputs[2];
-            case 2:
-            case 1:
-            break;
-        }
-        topology.add(prim);
-
-        cldnn::primitive_id non_max_supression_id_r = layer_type_lower(layer) + ":" + layer->outData[1]->getName();
-        auto argmax_mutable_prim_r = cldnn::mutable_data(non_max_supression_id_r, { nonMaxSupressionLayerName }, shared_memory);
-        primitivesToIRLayersMap[non_max_supression_id_r] = { layer->name };
-        primitiveIDs[non_max_supression_id_r] = non_max_supression_id_r;
-        topology.add(argmax_mutable_prim_r);
-
-        AddPrimitiveToProfiler(nonMaxSupressionLayerName, layer);
-        } else {
-
-            auto mutable_precision_first = layer->outData[1]->getPrecision();
-            auto mutable_precision_second = layer->outData[2]->getPrecision();
-
-            cldnn::layout mutableLayoutFirst = cldnn::layout(
-                DataTypeFromPrecision(mutable_precision_first),
-                m_defaultFormat,
-                CldnnTensorFromIEDims(layer->outData[1]->getDims()));
-
-            cldnn::layout mutableLayoutSecond = cldnn::layout(
-                DataTypeFromPrecision(mutable_precision_second),
-                m_defaultFormat,
-                CldnnTensorFromIEDims(layer->outData[2]->getDims()));
-
-            auto shared_memory_first = cldnn::memory::allocate(*m_engine, mutableLayoutFirst);
-            auto shared_memory_second = cldnn::memory::allocate(*m_engine, mutableLayoutSecond);
-
-            cldnn::primitive_id non_max_supression_mutable_id_w_first = layer_type_name_ID(layer) + "_md_write_first";
-            auto argmax_mutable_prim_first = cldnn::mutable_data(non_max_supression_mutable_id_w_first, shared_memory_first);
-            primitivesToIRLayersMap[non_max_supression_mutable_id_w_first] = { layer->name };
-            primitiveIDs[non_max_supression_mutable_id_w_first] = non_max_supression_mutable_id_w_first;
-            topology.add(argmax_mutable_prim_first);
-            inputPrimitives.push_back(non_max_supression_mutable_id_w_first);
-
-            cldnn::primitive_id non_max_supression_mutable_id_w_second = layer_type_name_ID(layer) + "_md_write_second";
-            auto argmax_mutable_prim_second = cldnn::mutable_data(non_max_supression_mutable_id_w_second, shared_memory_second);
-            primitivesToIRLayersMap[non_max_supression_mutable_id_w_second] = { layer->name };
-            primitiveIDs[non_max_supression_mutable_id_w_second] = non_max_supression_mutable_id_w_second;
-            topology.add(argmax_mutable_prim_second);
-            inputPrimitives.push_back(non_max_supression_mutable_id_w_second);
-
-            std::string nonMaxSupressionLayerName = layer_type_lower(layer) + ":" + layer->outData[0]->getName();
-            auto prim = cldnn::non_max_suppression(
-                nonMaxSupressionLayerName,
-                reorderedInputs[0],
-                reorderedInputs[1],
-                static_cast<int>(outputIndices),
-                centerPointBox,
-                non_max_supression_mutable_id_w_first,
-                non_max_supression_mutable_id_w_second);
-
-            switch (reorderedInputs.size()) {
-                case 6: prim.soft_nms_sigma = reorderedInputs[5];
-                case 5: prim.score_threshold = reorderedInputs[4];
-                case 4: prim.iou_threshold = reorderedInputs[3];
-                case 3: prim.num_select_per_class = reorderedInputs[2];
-                case 2:
-                case 1:
-                break;
-            }
-            topology.add(prim);
-
-            cldnn::primitive_id non_max_supression_id_r_first = layer_type_lower(layer) + ":" + layer->outData[1]->getName();
-            auto argmax_mutable_prim_r_first = cldnn::mutable_data(non_max_supression_id_r_first, { nonMaxSupressionLayerName }, shared_memory_first);
-            primitivesToIRLayersMap[non_max_supression_id_r_first] = { layer->name };
-            primitiveIDs[non_max_supression_id_r_first] = non_max_supression_id_r_first;
-            topology.add(argmax_mutable_prim_r_first);
-
-            cldnn::primitive_id non_max_supression_id_r_second = layer_type_lower(layer) + ":" + layer->outData[2]->getName();
-            auto argmax_mutable_prim_r_second = cldnn::mutable_data(non_max_supression_id_r_second, { nonMaxSupressionLayerName }, shared_memory_second);
-            primitivesToIRLayersMap[non_max_supression_id_r_second] = { layer->name };
-            primitiveIDs[non_max_supression_id_r_second] = non_max_supression_id_r_second;
-            topology.add(argmax_mutable_prim_r_second);
-
-            AddPrimitiveToProfiler(nonMaxSupressionLayerName, layer);
-        }*/
 }
 
 void Program::CreateSelectPrimitive(cldnn::topology& topology, InferenceEngine::CNNLayerPtr& layer) {

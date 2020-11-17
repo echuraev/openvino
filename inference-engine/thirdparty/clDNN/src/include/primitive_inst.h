@@ -86,7 +86,14 @@ public:
         return reinterpret_cast<std::vector<std::shared_ptr<const primitive_inst>> const&>(_deps);
     }
 
-    memory_impl& dep_memory(size_t index) const { return dependencies().at(index)->output_memory(); }
+    memory_impl& dep_memory(size_t index) const {
+        //int i = 0;
+        //for (auto& dep : dependencies()) {
+        //    std::cout << i << " >>> dep: " << dep->id() << std::endl;
+        //    ++i;
+        //}
+        return dependencies().at(index)->output_memory();
+    }
     memory_impl& output_memory() const { return *_output; }
     size_t inputs_memory_count() const { return _node.get_primitive()->input_size(); }
     primitive_type_id type() const { return _node.type(); }

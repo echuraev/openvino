@@ -778,11 +778,18 @@ void CLDNNInferRequest::execAndParse() {
         if (!bptr->is<gpu::ClBlob>()) {
             auto out_ptr = outputMemory.pointer<uint8_t>();
             auto blob_ptr = bptr->buffer().as<uint8_t*>();
+            auto f_ptr = outputMemory.pointer<float>();
+            std::cout << "execAndParse: " << outputID << " : " << &blob_ptr
+                      << ", " << reinterpret_cast<int*>(out_ptr.data()) << ", " << &out_ptr[0]
+                      << ", f: " << f_ptr.data() << std::endl;
 
             // If Async API is used, copy of output blobs is not needed, unless SetBlob function was called.
             // But in the case when old API is used we have to copy data to memory provided by user.
             if (blob_ptr != &out_ptr[0]) {
+                std::cout << "Copy output data!" << std::endl;
                 copyOutputData(outputMemory, bptr);
+            } else {
+                std::cout << "Not Copy output data!" << std::endl;
             }
         }
     }

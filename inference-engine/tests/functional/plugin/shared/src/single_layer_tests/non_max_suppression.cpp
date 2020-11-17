@@ -93,9 +93,17 @@ void NmsLayerTest::Compare(const std::vector<std::vector<std::uint8_t>> &expecte
         size_t size = expected.size() / actual->getTensorDesc().getPrecision().size();
         switch (precision) {
             case Precision::FP32:
+                std::cout << " >>> compare: " << outputIndex
+                          << ", size: " << expected.size() << ", address: "
+                          << reinterpret_cast<const float *>(actualBuffer)
+                          << std::endl;
                 LayerTestsCommon::Compare(reinterpret_cast<const float *>(expectedBuffer), reinterpret_cast<const float *>(actualBuffer), size, threshold);
                 break;
             case Precision::I32:
+                std::cout << " >>> compare: " << outputIndex
+                          << ", size: " << expected.size() << ", address: "
+                          << reinterpret_cast<const int32_t *>(actualBuffer)
+                          << std::endl;
                 LayerTestsCommon::Compare(reinterpret_cast<const int32_t *>(expectedBuffer), reinterpret_cast<const int32_t *>(actualBuffer), size, 0);
                 break;
             default:
